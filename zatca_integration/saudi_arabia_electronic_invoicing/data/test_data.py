@@ -20,7 +20,6 @@ TEST_ITEM_DATA = {
 
 TEST_CUSTOMER_DATA = {
     "customer_name": "TEST-1 Customer",
-    "customer_group": "All Customer Groups",
     # "territory": "Saudi Arabia",
     "custom_country": "Saudi Arabia",
     "customer_name_short": "S-CHEM",
@@ -87,6 +86,7 @@ def create_test_customer(
             {
                 "doctype": "Customer",
                 "customer_type": customer_type,
+                "customer_group": get_customer_group(),
                 "tax_id": tax_id,
                 "custom_vat_number": vat_number,
             }
@@ -549,3 +549,25 @@ def get_cost_center(company):
 
     except Exception as e:
         frappe.throw(f"Error fetching cost center for company '{company}': {e}")
+
+
+def get_customer_group():
+    """Return a non-group Customer Group required for Customer creation."""
+    customer_group = frappe.get_value("Customer Group", {"is_group": 0}, "name")
+    if customer_group:
+        return customer_group
+
+    parent_group = frappe.get_value("Customer Group", {"is_group": 1}, "name") or "All Customer Groups"
+    customer_group_name = "ZATCA Test"
+
+    if not frappe.db.exists("Customer Group", customer_group_name):
+        frappe.get_doc(
+            {
+                "doctype": "Customer Group",
+                "customer_group_name": customer_group_name,
+                "parent_customer_group": parent_group,
+                "is_group": 0,
+            }
+        ).insert(ignore_permissions=True)
+
+    return customer_group_name
