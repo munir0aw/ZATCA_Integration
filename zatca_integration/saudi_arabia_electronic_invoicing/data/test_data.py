@@ -9,7 +9,6 @@ TEST_ITEM_DATA = {
     "item_code": "Test Item 1",
     "item_name": "Test Item 1",
     "description": "Barcode, Self-Adhesive, 3in Wide x 1in Height x 2mm Thick",
-    "item_group": "All Item Groups",
     "qty": 16,
     "uom": "Nos",
     "rate": 375,
@@ -34,8 +33,6 @@ INVOICE_BASE_DATA = {
     "is_pos": 0,
     "currency": "SAR",
     "conversion_rate": 1,
-    "selling_price_list": "Standard Selling",
-    "price_list_currency": "SAR",
     "update_stock": 0,
     "total_qty": 16,
     "base_total": 6000,
@@ -68,7 +65,8 @@ def create_test_item(company):
         }
     )
 
-    create_item_if_missing(item_data)
+    selling_price_list, _price_list_currency = get_selling_price_list(company)
+    ensure_test_item(company, item_data, selling_price_list)
     return item_data
 
 
@@ -107,6 +105,7 @@ def create_base_invoice_data(company, csr_data, compliance_name, customer, item_
     """Create base invoice data structure"""
     today = nowdate()
     tomorrow = add_to_date(today, days=1)
+    selling_price_list, price_list_currency = get_selling_price_list(company)
 
     invoice_data = INVOICE_BASE_DATA.copy()
     invoice_data.update(
@@ -119,6 +118,8 @@ def create_base_invoice_data(company, csr_data, compliance_name, customer, item_
             "custom_delivery_date": today,
             "posting_date": today,
             "due_date": tomorrow,
+            "selling_price_list": selling_price_list,
+            "price_list_currency": price_list_currency,
             "taxes_and_charges": get_tax_template_with_15_percent(company),
             "cost_center": get_cost_center(company),
             "custom_compliance": compliance_name,
@@ -422,21 +423,126 @@ def sanitize_company_name(csr_data):
     return company_name
 
 
-def create_item_if_missing(item_data):
-    if not frappe.db.exists("Item", item_data["item_code"]):
+def ensure_test_item(company, item_data, selling_price_list=None):
+    """Create or update the ZATCA test item with valid master links."""
+    item_code = item_data["item_code"]
+    item_group = get_item_group()
+    stock_uom = get_stock_uom(item_data.get("uom", "Nos"))
+    item_data["item_group"] = item_group
+    item_data["uom"] = stock_uom
+
+    if selling_price_list is None:
+        selling_price_list, _ = get_selling_price_list(company)
+
+    if not frappe.db.exists("Item", item_code):
         frappe.get_doc(
             {
                 "doctype": "Item",
-                "item_code": item_data["item_code"],
+                "item_code": item_code,
                 "item_name": item_data["item_name"],
                 "description": item_data["description"],
-                "item_group": item_data.get("item_group", "All Item Groups"),
-                "stock_uom": item_data.get("uom", "Nos"),
+                "item_group": item_group,
+                "stock_uom": stock_uom,
                 "is_stock_item": 1,
                 "disabled": 0,
+                "item_defaults": [
+                    {
+                        "company": company,
+                        "default_warehouse": item_data.get("warehouse"),
+                        "income_account": item_data.get("income_account"),
+                        "expense_account": item_data.get("expense_account"),
+                    }
+                ],
             }
         ).insert(ignore_permissions=True)
-        frappe.db.commit()
+    else:
+        item = frappe.get_doc("Item", item_code)
+        updated = False
+        if item.disabled:
+            item.disabled = 0
+            updated = True
+        if item.item_group != item_group:
+            item.item_group = item_group
+            updated = True
+        if item.stock_uom != stock_uom:
+            item.stock_uom = stock_uom
+            updated = True
+        if not any(row.company == company for row in item.get("item_defaults", [])):
+            item.append(
+                "item_defaults",
+                {
+                    "company": company,
+                    "default_warehouse": item_data.get("warehouse"),
+                    "income_account": item_data.get("income_account"),
+                    "expense_account": item_data.get("expense_account"),
+                },
+            )
+            updated = True
+        if updated:
+            item.save(ignore_permissions=True)
+
+    ensure_item_price(item_code, selling_price_list, item_data.get("rate", 0))
+
+    if not frappe.db.exists("Item", item_code):
+        frappe.throw(f"Failed to create test item '{item_code}' for ZATCA compliance check.")
+
+
+def ensure_item_price(item_code, price_list, rate):
+    if not price_list or not frappe.db.exists("Price List", price_list):
+        return
+
+    if frappe.db.exists(
+        "Item Price",
+        {"item_code": item_code, "price_list": price_list, "selling": 1},
+    ):
+        return
+
+    frappe.get_doc(
+        {
+            "doctype": "Item Price",
+            "item_code": item_code,
+            "price_list": price_list,
+            "selling": 1,
+            "currency": frappe.get_value("Price List", price_list, "currency") or "SAR",
+            "price_list_rate": rate or 1,
+        }
+    ).insert(ignore_permissions=True)
+
+
+def get_item_group():
+    """Return a non-group Item Group required for Item creation."""
+    item_group = frappe.get_value("Item Group", {"is_group": 0}, "name")
+    if item_group:
+        return item_group
+
+    parent_group = frappe.get_value("Item Group", {"is_group": 1}, "name") or "All Item Groups"
+    item_group_name = "ZATCA Test"
+
+    if not frappe.db.exists("Item Group", item_group_name):
+        frappe.get_doc(
+            {
+                "doctype": "Item Group",
+                "item_group_name": item_group_name,
+                "parent_item_group": parent_group,
+                "is_group": 0,
+            }
+        ).insert(ignore_permissions=True)
+
+    return item_group_name
+
+
+def get_stock_uom(preferred_uom="Nos"):
+    if preferred_uom and frappe.db.exists("UOM", preferred_uom):
+        return preferred_uom
+
+    uom = frappe.get_value("UOM", {}, "name")
+    if uom:
+        return uom
+
+    if not frappe.db.exists("UOM", preferred_uom):
+        frappe.get_doc({"doctype": "UOM", "uom_name": preferred_uom}).insert(ignore_permissions=True)
+
+    return preferred_uom
 
 
 def create_customer_address(customer_name):
@@ -571,3 +677,44 @@ def get_customer_group():
         ).insert(ignore_permissions=True)
 
     return customer_group_name
+
+
+def get_selling_price_list(company, currency="SAR"):
+    """Return an enabled selling Price List and its currency."""
+    default_price_list = frappe.get_value("Company", company, "default_selling_price_list")
+    if default_price_list and frappe.db.exists("Price List", default_price_list):
+        price_list_currency = frappe.get_value("Price List", default_price_list, "currency")
+        return default_price_list, price_list_currency or currency
+
+    price_list = frappe.get_value(
+        "Price List",
+        {"enabled": 1, "selling": 1, "currency": currency},
+        ["name", "currency"],
+        as_dict=True,
+    )
+    if price_list:
+        return price_list.name, price_list.currency
+
+    price_list = frappe.get_value(
+        "Price List",
+        {"enabled": 1, "selling": 1},
+        ["name", "currency"],
+        as_dict=True,
+    )
+    if price_list:
+        return price_list.name, price_list.currency
+
+    price_list_name = "ZATCA Test Selling"
+    if not frappe.db.exists("Price List", price_list_name):
+        frappe.get_doc(
+            {
+                "doctype": "Price List",
+                "price_list_name": price_list_name,
+                "currency": currency,
+                "enabled": 1,
+                "selling": 1,
+                "buying": 0,
+            }
+        ).insert(ignore_permissions=True)
+
+    return price_list_name, currency
