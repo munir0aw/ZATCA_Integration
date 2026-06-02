@@ -681,7 +681,10 @@ def get_customer_group():
 
 def get_selling_price_list(company, currency="SAR"):
     """Return an enabled selling Price List and its currency."""
-    default_price_list = frappe.get_value("Company", company, "default_selling_price_list")
+    default_price_list = frappe.get_single_value("Selling Settings", "selling_price_list")
+    if not default_price_list and frappe.get_meta("Company").has_field("default_selling_price_list"):
+        default_price_list = frappe.get_value("Company", company, "default_selling_price_list")
+
     if default_price_list and frappe.db.exists("Price List", default_price_list):
         price_list_currency = frappe.get_value("Price List", default_price_list, "currency")
         return default_price_list, price_list_currency or currency
