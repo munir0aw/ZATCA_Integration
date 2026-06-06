@@ -76,6 +76,13 @@ def generate_einvoice(doc, submit_now=True, skip_success_message=False):
     }
 
     invoice_data = _prepare_invoice_data(doc, config)
+    invoice_xml = decode_invoice(payload.get("invoice"))
+
+    if doc.custom_is_zatca_test:
+        _save_invoice_xml(doc, invoice_xml)
+        if customer_type == "Individual":
+            _save_qr_code(doc, invoice_xml)
+        return
 
     # Check if Company is a Saudi Arabia based company
     if company.country != "Saudi Arabia":
@@ -87,18 +94,15 @@ def generate_einvoice(doc, submit_now=True, skip_success_message=False):
         and not company.custom_zatca_phase == "ZATCA Phase 2"
     ):
         return
-    invoice_xml = decode_invoice(payload.get("invoice"))
+
     _save_invoice_xml(doc, invoice_xml)
 
     if customer_type == "Individual" and not submit_now:
-        # _save_invoice_xml(doc, invoice_xml)
         _save_qr_code(doc, invoice_xml)
         doc.custom_zatca_submit_status = "PENDING"
         return
 
     validate_invoice_dates(doc, company, customer_type)
-    if doc.custom_is_zatca_test:
-        return
     if not skip_success_message and not frappe.flags.get("zatca_bulk_report"):
         frappe.msgprint("Sales Invoice sent to ZATCA", alert=True)
     try:

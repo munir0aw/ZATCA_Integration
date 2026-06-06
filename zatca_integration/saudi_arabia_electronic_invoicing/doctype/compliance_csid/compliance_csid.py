@@ -96,6 +96,10 @@ class ComplianceCSID(Document):
             frappe.throw(
                 "Binary Security Token is not generated. Please Generate ZATCA Compliance CSID"
             )
+        if not self.secret:
+            frappe.throw(
+                "Compliance CSID secret is missing. Please regenerate the ZATCA Compliance CSID."
+            )
 
         csr_settings = frappe.get_doc("Zatca CSR Settings", self.csr_settings)
         seller = get_seller_information(csr_settings)
@@ -300,16 +304,94 @@ class ComplianceCSID(Document):
             }
         )
         transaction.insert()
+        frappe.db.commit()
 
-        if response_code in (200, 202):
+        if self._is_compliance_api_success(response_code, response_json):
             return True, invoice_request["invoiceHash"]
-        if response_code == 406 or self._is_compliance_already_completed(response_json):
-            frappe.log_error(
-                title="ZATCA Compliance Invoice Already Submitted",
-                message=f"{invoice_request['invoiceHash']} was already submitted.",
-            )
-            return True, invoice_request["invoiceHash"]
+
+        frappe.log_error(
+            title="ZATCA Compliance Invoice Validation Failed",
+            message=self._format_transaction_error(response_code, response_text, response_json),
+        )
         return False, None
+
+    def _normalize_response_code(self, response_code):
+        if response_code is None:
+            return None
+        try:
+            return int(response_code)
+        except (TypeError, ValueError):
+            return response_code
+
+    def _is_compliance_api_success(self, response_code, response_json):
+        response_code = self._normalize_response_code(response_code)
+        if response_code in (200, 202):
+            return True
+        if response_code == 406 or self._is_compliance_already_completed(response_json):
+            return True
+        if response_json:
+            validation_status = (response_json.get("validationResults") or {}).get("status")
+            if validation_status == "PASS":
+                return True
+        return False
+
+    def _format_transaction_error(self, response_code, response_text, response_json=None):
+        response_code = self._normalize_response_code(response_code)
+        if response_code is None:
+            return response_text or "No response received from ZATCA compliance API."
+
+        if not response_json and response_text:
+            try:
+                response_json = json.loads(response_text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                response_json = None
+
+        if response_json:
+            validation_results = response_json.get("validationResults") or {}
+            error_messages = validation_results.get("errorMessages") or []
+            warning_messages = validation_results.get("warningMessages") or []
+            messages = []
+            for error in error_messages + warning_messages:
+                if not error:
+                    continue
+                code = error.get("code") or error.get("type") or ""
+                message = error.get("message") or error.get("category") or str(error)
+                messages.append(f"{code}: {message}".strip(": "))
+            if messages:
+                return f"HTTP {response_code} - " + "; ".join(messages)
+
+        if response_text:
+            return f"HTTP {response_code} - {response_text[:500]}"
+
+        return f"HTTP {response_code} - ZATCA compliance validation failed."
+
+    def _get_recent_compliance_transaction_errors(self, limit=6):
+        transactions = frappe.get_all(
+            "CSID Transactions",
+            filters={"compliance_csid": self.name},
+            fields=["response_code", "response_body"],
+            order_by="transaction_time desc",
+            limit=limit,
+        )
+        errors = []
+        for transaction in transactions:
+            response_json = None
+            if transaction.response_body:
+                try:
+                    response_json = json.loads(transaction.response_body)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    response_json = None
+
+            response_code = self._normalize_response_code(transaction.response_code)
+            if self._is_compliance_api_success(response_code, response_json):
+                continue
+
+            errors.append(
+                self._format_transaction_error(
+                    response_code, transaction.response_body, response_json
+                )
+            )
+        return errors
 
     def _is_compliance_already_completed(self, response_json):
         """Return True if ZATCA indicates the document was already submitted."""
@@ -337,10 +419,17 @@ class ComplianceCSID(Document):
         if failed:
             self.save()
             frappe.db.commit()
-            frappe.throw(
+            error_details = self._get_recent_compliance_transaction_errors()
+            message = (
                 f"Failed to Validate Compliance CSID for: {', '.join(failed)}. "
-                "Review CSID TRANSACTIONS for more details."
+                "Review CSID TRANSACTIONS for full request/response logs."
             )
+            if error_details:
+                message += "<br><br><b>Latest ZATCA responses:</b><ul>"
+                for detail in error_details[:3]:
+                    message += f"<li>{frappe.utils.escape_html(detail)}</li>"
+                message += "</ul>"
+            frappe.throw(message, title="ZATCA Compliance Validation Failed")
 
     def _is_standard_validation_pending(self):
         return not all(
