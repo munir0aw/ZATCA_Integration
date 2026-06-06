@@ -734,31 +734,59 @@ def get_certificate_and_public_key(binary_security_token, created_on):
 
 
 @frappe.whitelist()
-def delete_zatca_test_invoices_and_related_docs():
+def delete_zatca_test_invoices_and_related_docs(silent=False):
     test_invoices = frappe.get_all(
-        "Sales Invoice", filters={"custom_is_zatca_test": 1}, fields=["name", "customer"]
+        "Sales Invoice",
+        filters={"custom_is_zatca_test": 1},
+        fields=["name", "customer", "is_return"],
     )
+    test_invoices.sort(key=lambda row: (row.is_return or 0, row.name))
+
+    customers_to_delete = set()
+    items_to_delete = set()
+    warehouses_to_delete = set()
 
     for inv in test_invoices:
         invoice_name = inv.name
-        customer_name = inv.customer
 
         try:
-            frappe.msgprint(f"Processing test invoice: {invoice_name}")
+            if not silent:
+                frappe.msgprint(f"Processing test invoice: {invoice_name}")
             invoice = frappe.get_doc("Sales Invoice", invoice_name)
 
             delete_gl_and_payment_ledgers(invoice_name)
             delete_zatca_transaction(invoice_name)
-            delete_return_invoice(invoice_name)
+            if not invoice.is_return:
+                delete_return_invoice(invoice_name)
             cancel_and_delete_invoice(invoice)
-            delete_items_and_warehouses(invoice)
-            delete_customer_and_addresses(customer_name)
+
+            if inv.customer:
+                customers_to_delete.add(inv.customer)
+            for row in invoice.items:
+                item_name = resolve_item_name(row.item_code)
+                if item_name:
+                    items_to_delete.add(item_name)
+                if row.warehouse:
+                    warehouses_to_delete.add(row.warehouse)
 
         except Exception as e:
             frappe.log_error(
                 frappe.get_traceback(), f"Failed to delete test invoice {invoice_name}"
             )
-            frappe.msgprint(f"Error deleting {invoice_name}: {e}")
+            if not silent:
+                frappe.msgprint(f"Error deleting {invoice_name}: {e}")
+
+    for item_name in items_to_delete:
+        delete_item_prices_for_item(item_name)
+        if frappe.db.exists("Item", item_name):
+            frappe.delete_doc("Item", item_name, force=1)
+
+    for warehouse_name in warehouses_to_delete:
+        if frappe.db.exists("Warehouse", warehouse_name):
+            frappe.delete_doc("Warehouse", warehouse_name, force=1)
+
+    for customer_name in customers_to_delete:
+        delete_customer_and_addresses(customer_name)
 
 
 # -----------------------------
@@ -804,11 +832,27 @@ def cancel_and_delete_invoice(invoice):
     frappe.delete_doc("Sales Invoice", invoice.name, force=1)
 
 
+def resolve_item_name(item_identifier):
+    """Resolve Item.name from a Link value or item_code field value."""
+    if frappe.db.exists("Item", item_identifier):
+        return item_identifier
+
+    return frappe.db.get_value("Item", {"item_code": item_identifier}, "name")
+
+
+def delete_item_prices_for_item(item_name):
+    item_prices = frappe.get_all("Item Price", filters={"item_code": item_name}, pluck="name")
+    for item_price_name in item_prices:
+        frappe.delete_doc("Item Price", item_price_name, force=1)
+
+
 def delete_items_and_warehouses(invoice):
     item_codes = [row.item_code for row in invoice.items]
     for item_code in item_codes:
-        if frappe.db.exists("Item", item_code):
-            frappe.delete_doc("Item", item_code, force=1)
+        item_name = resolve_item_name(item_code)
+        if item_name:
+            delete_item_prices_for_item(item_name)
+            frappe.delete_doc("Item", item_name, force=1)
 
     warehouses = list(set([row.warehouse for row in invoice.items if row.warehouse]))
     for wh in warehouses:

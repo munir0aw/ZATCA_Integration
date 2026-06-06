@@ -3,6 +3,7 @@
 
 import base64
 import json
+import os
 import struct
 import time
 import uuid
@@ -100,6 +101,9 @@ class ComplianceCSID(Document):
         seller = get_seller_information(csr_settings)
         buyer = get_buyer_information()
 
+        if self._should_cleanup_test_invoices(csr_settings):
+            delete_zatca_test_invoices_and_related_docs(silent=True)
+
         if csr_settings.csrinvoicetype == "1100":
             if self._is_standard_validation_pending():
                 self.invoke_complaince_check("standard", csr_settings, seller, buyer)
@@ -107,67 +111,45 @@ class ComplianceCSID(Document):
             if self._is_simplified_validation_pending():
                 self.invoke_complaince_check("simplified", csr_settings, seller, buyer)
 
-            if not (
-                self.standard_invoice
-                and self.standard_credit_note
-                and self.standard_debit_note
-                and self.simplified_invoice
-                and self.simplified_credit_note
-                and self.simplified_debit_note
-            ):
-                self.save()
-                frappe.db.commit()
-                frappe.throw(
-                    "Failed to Validate Compliance CSID, Review CSID TRANSACTIONS for more details"
-                )
-            failed = []
-
-            if not self.standard_invoice:
-                failed.append("Standard Invoice")
-            if not self.standard_credit_note:
-                failed.append("Standard Credit Note")
-            if not self.standard_debit_note:
-                failed.append("Standard Debit Note")
-            if not self.simplified_invoice:
-                failed.append("Simplified Invoice")
-            if not self.simplified_credit_note:
-                failed.append("Simplified Credit Note")
-            if not self.simplified_debit_note:
-                failed.append("Simplified Debit Note")
-
-            if failed:
-                self.save()
-                frappe.db.commit()
-                frappe.throw(
-                    f"Failed to Validate Compliance CSID for: {', '.join(failed)}. "
-                    "Review CSID TRANSACTIONS for more details."
-                )
+            self._raise_if_compliance_failed(
+                {
+                    "Standard Invoice": self.standard_invoice,
+                    "Standard Credit Note": self.standard_credit_note,
+                    "Standard Debit Note": self.standard_debit_note,
+                    "Simplified Invoice": self.simplified_invoice,
+                    "Simplified Credit Note": self.simplified_credit_note,
+                    "Simplified Debit Note": self.simplified_debit_note,
+                }
+            )
         elif csr_settings.csrinvoicetype == "1000":
             if self._is_standard_validation_pending():
                 self.invoke_complaince_check("standard", csr_settings, seller, buyer)
-            if not (
-                self.standard_invoice and self.standard_credit_note and self.standard_debit_note
-            ):
-                self.save()
-                frappe.db.commit()
-                frappe.throw(
-                    "Failed to Validate Compliance CSID, Review CSID TRANSACTIONS for more details"
-                )
+
+            self._raise_if_compliance_failed(
+                {
+                    "Standard Invoice": self.standard_invoice,
+                    "Standard Credit Note": self.standard_credit_note,
+                    "Standard Debit Note": self.standard_debit_note,
+                }
+            )
         elif csr_settings.csrinvoicetype == "0100":
             if self._is_simplified_validation_pending():
                 self.invoke_complaince_check("simplified", csr_settings, seller, buyer)
-            if not (self.simplified_invoice):
-                frappe.db.commit()
-                frappe.throw(
-                    "Failed to Validate Compliance CSID, Review CSID TRANSACTIONS for more details"
-                )
+
+            self._raise_if_compliance_failed(
+                {
+                    "Simplified Invoice": self.simplified_invoice,
+                    "Simplified Credit Note": self.simplified_credit_note,
+                    "Simplified Debit Note": self.simplified_debit_note,
+                }
+            )
         else:
             frappe.throw(
                 "Invalid Invoice Type in ZATCA CSR Settings : " + csr_settings.csrinvoicetype
             )
 
         self.save()
-        delete_zatca_test_invoices_and_related_docs()
+        delete_zatca_test_invoices_and_related_docs(silent=True)
 
     def set_invoice_status(self, invoice_type, status, note_type):
         """Set the status of the invoice or note."""
@@ -230,7 +212,7 @@ class ComplianceCSID(Document):
         elif invoice_type == "simplified":
             self.simplified_credit_note = credit_note_status
 
-        # Issue Invoice
+        # Issue second tax invoice (distinct test document from INV-00001)
         tax_invoice = generate_tax_invoice_xml(
             compliance_name,
             csr_settings,
@@ -239,6 +221,7 @@ class ComplianceCSID(Document):
             seller,
             buyer,
             credit_note_hash,
+            invoice_variant="secondary",
         )
         tax_invoice_status, tax_invoice_hash = self.invoke_compliance_invoice_api(
             invoice_type, csr_settings, tax_invoice["xml"]
@@ -282,7 +265,8 @@ class ComplianceCSID(Document):
             "Accept-Version": "V2",
             "Content-Type": "application/json",
         }
-        _response_json = None
+        response = None
+        response_json = None
         try:
             response = requests.post(
                 zatca_environment.compliance_invoice_api,
@@ -294,14 +278,14 @@ class ComplianceCSID(Document):
             response_text = response.text
             response_headers = dict(response.headers)
             try:
-                _response_json = response.json()
+                response_json = response.json()
             except ValueError:
-                _response_json = None
+                response_json = None
         except requests.exceptions.RequestException as e:
             response_code = None
             response_text = str(e)
             response_headers = {}
-        # Save the request and response details
+
         transaction = frappe.get_doc(
             {
                 "doctype": "CSID Transactions",
@@ -317,15 +301,13 @@ class ComplianceCSID(Document):
         )
         transaction.insert()
 
-        if response.status_code == 200 or response.status_code == 202:
+        if response_code in (200, 202):
             return True, invoice_request["invoiceHash"]
-        if response.status_code == 406:
+        if response_code == 406 or self._is_compliance_already_completed(response_json):
             frappe.log_error(
                 title="ZATCA Compliance Invoice Already Submitted",
                 message=f"{invoice_request['invoiceHash']} was already submitted.",
             )
-            # ZATCA returns 406 when the exact payload was already validated;
-            # treat it as a success so downstream steps keep running.
             return True, invoice_request["invoiceHash"]
         return False, None
 
@@ -340,6 +322,25 @@ class ComplianceCSID(Document):
             if isinstance(message, str) and "submitted before" in message.lower():
                 return True
         return False
+
+    def _should_cleanup_test_invoices(self, csr_settings):
+        if csr_settings.csrinvoicetype == "1100":
+            return self._is_standard_validation_pending() or self._is_simplified_validation_pending()
+        if csr_settings.csrinvoicetype == "1000":
+            return self._is_standard_validation_pending()
+        if csr_settings.csrinvoicetype == "0100":
+            return self._is_simplified_validation_pending()
+        return False
+
+    def _raise_if_compliance_failed(self, required_statuses):
+        failed = [label for label, status in required_statuses.items() if not status]
+        if failed:
+            self.save()
+            frappe.db.commit()
+            frappe.throw(
+                f"Failed to Validate Compliance CSID for: {', '.join(failed)}. "
+                "Review CSID TRANSACTIONS for more details."
+            )
 
     def _is_standard_validation_pending(self):
         return not all(
@@ -626,7 +627,14 @@ def generate_credit_note_xml(
 
 
 def generate_tax_invoice_xml(
-    compliance_name, csr_settings, invoiceType, invoiceNumber, seller, buyer, previousInvoiceHash
+    compliance_name,
+    csr_settings,
+    invoiceType,
+    invoiceNumber,
+    seller,
+    buyer,
+    previousInvoiceHash,
+    invoice_variant="primary",
 ):
     # Global Unique Identifier
     uniqueInvoiceIdentifier = str(uuid.uuid4())
@@ -641,9 +649,13 @@ def generate_tax_invoice_xml(
         frappe.utils.getdate(frappe.utils.today()) + timedelta(days=10)
     ).strftime("%Y-%m-%d")
     if invoiceType == "standard":
-        invoice_name = create_standard_test_sales_invoice(csr_settings, compliance_name)
+        invoice_name = create_standard_test_sales_invoice(
+            csr_settings, compliance_name, variant=invoice_variant
+        )
     elif invoiceType == "simplified":
-        invoice_name = create_test_sales_invoice(csr_settings, compliance_name)
+        invoice_name = create_test_sales_invoice(
+            csr_settings, compliance_name, variant=invoice_variant
+        )
 
     standard_invoice_xml = render_template(invoice_name)
     standard_invoice = {
@@ -657,16 +669,26 @@ def generate_tax_invoice_xml(
 
 
 def render_template(invoice_name):
-    file_url = frappe.get_doc("Sales Invoice", invoice_name).custom_invoice_xml
+    sales_invoice = frappe.get_doc("Sales Invoice", invoice_name)
+    file_url = sales_invoice.custom_invoice_xml
+    if not file_url:
+        frappe.throw(
+            f"Invoice XML was not generated for {invoice_name}. "
+            "Ensure ZATCA e-invoicing is enabled, the company is in ZATCA Phase 2, "
+            "and the test invoice submitted successfully."
+        )
 
-    file_doc = frappe.get_doc("File", {"file_url": file_url})
+    file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
+    if not file_name:
+        frappe.throw(f"XML file record not found for invoice {invoice_name} ({file_url}).")
 
+    file_doc = frappe.get_doc("File", file_name)
     file_path = frappe.get_site_path("public", file_doc.file_url.lstrip("/"))
+    if not os.path.exists(file_path):
+        frappe.throw(f"XML file not found on disk for invoice {invoice_name}: {file_path}")
 
     with open(file_path, encoding="utf-8") as f:
-        xml_template = f.read()
-
-    return xml_template
+        return f.read()
 
 
 def get_buyer_information():

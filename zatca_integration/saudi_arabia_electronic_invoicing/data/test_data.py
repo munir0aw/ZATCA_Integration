@@ -26,6 +26,20 @@ TEST_CUSTOMER_DATA = {
     "disabled": 0,
 }
 
+STANDARD_TEST_INVOICE_NAMES = {
+    "primary": "TEST-SINV-2025-100",
+    "secondary": "TEST-SINV-2025-103",
+    "credit_note": "TEST-SINV-2025-101",
+    "debit_note": "TEST-SINV-2025-105",
+}
+
+SIMPLIFIED_TEST_INVOICE_NAMES = {
+    "primary": "TEST-SINV-2025-200",
+    "secondary": "TEST-SINV-2025-203",
+    "credit_note": "TEST-SINV-2025-201",
+    "debit_note": "TEST-SINV-2025-205",
+}
+
 INVOICE_BASE_DATA = {
     "custom_delivery_date": None,
     "custom_payment_means": "Bank Payment",
@@ -70,35 +84,38 @@ def create_test_item(company):
     return item_data
 
 
+def get_test_customer_name(customer_type):
+    return f"{TEST_CUSTOMER_DATA['customer_name']} ({customer_type})"
+
+
 def create_test_customer(
     customer_type="Individual", tax_id="300450349600003", vat_number="300450349600003"
 ):
     """Create test customer if it doesn't exist"""
+    customer_name = get_test_customer_name(customer_type)
 
-    base_name = TEST_CUSTOMER_DATA["customer_name"]
-    customer_name = f"{base_name} ({customer_type})"
-
-    if not frappe.db.exists("Customer", customer_name):
-        customer_data = TEST_CUSTOMER_DATA.copy()
-        customer_data.update(
-            {
-                "doctype": "Customer",
-                "customer_type": customer_type,
-                "customer_group": get_customer_group(),
-                "tax_id": tax_id,
-                "custom_vat_number": vat_number,
-            }
-        )
-
-        customer = frappe.get_doc(customer_data).insert(ignore_permissions=True)
-        create_customer_address(customer.name)
-        return customer
-    else:
+    if frappe.db.exists("Customer", customer_name):
         customer = frappe.get_doc("Customer", customer_name)
         if customer.customer_type != customer_type:
             customer.customer_type = customer_type
             customer.save(ignore_permissions=True)
         return customer
+
+    customer_data = TEST_CUSTOMER_DATA.copy()
+    customer_data.update(
+        {
+            "doctype": "Customer",
+            "customer_name": customer_name,
+            "customer_type": customer_type,
+            "customer_group": get_customer_group(),
+            "tax_id": tax_id,
+            "custom_vat_number": vat_number,
+        }
+    )
+
+    customer = frappe.get_doc(customer_data).insert(ignore_permissions=True)
+    create_customer_address(customer.name)
+    return customer
 
 
 def create_base_invoice_data(company, csr_data, compliance_name, customer, item_data):
@@ -111,7 +128,7 @@ def create_base_invoice_data(company, csr_data, compliance_name, customer, item_
     invoice_data.update(
         {
             "doctype": "Sales Invoice",
-            "customer": customer,
+            "customer": customer.name,
             "customer_name": customer.customer_name,
             "company": company,
             "company_tax_id": csr_data.csrorganizationidentifier,
@@ -186,23 +203,18 @@ def create_and_submit_invoice(invoice_data, invoice_name):
 
 
 @frappe.whitelist()
-def create_test_sales_invoice(csr_data, compliance_name, is_debit=0):
+def create_test_sales_invoice(csr_data, compliance_name, is_debit=0, variant="primary"):
     """Create test sales invoice (Individual customer)"""
     company = sanitize_company_name(csr_data)
-    # frappe.throw(str(csr))
-    # company = csr_data.csrorganizationname
-
-    invoice_name = "TEST-SINV-2025-200"
+    invoice_name = SIMPLIFIED_TEST_INVOICE_NAMES.get(variant, SIMPLIFIED_TEST_INVOICE_NAMES["primary"])
     if frappe.db.exists("Sales Invoice", invoice_name):
         return invoice_name
 
-    # Create components
     item_data = create_test_item(company)
     customer = create_test_customer(
         customer_type="Individual", tax_id="300450349600004", vat_number="300450349600003"
     )
 
-    # Create invoice data
     invoice_data = create_base_invoice_data(company, csr_data, compliance_name, customer, item_data)
     invoice_data.update(
         {
@@ -222,17 +234,15 @@ def create_test_simplified_debit_sales_invoice(csr_data, compliance_name):
     # frappe.throw(str(csr))
     # company = csr_data.csrorganizationname
 
-    invoice_name = "TEST-SINV-2025-205"
+    invoice_name = SIMPLIFIED_TEST_INVOICE_NAMES["debit_note"]
     if frappe.db.exists("Sales Invoice", invoice_name):
         return invoice_name
 
-    # Create components
     item_data = create_test_item(company)
     customer = create_test_customer(
         customer_type="Individual", tax_id="300450349600004", vat_number="300450349600003"
     )
 
-    # Create invoice data
     invoice_data = create_base_invoice_data(company, csr_data, compliance_name, customer, item_data)
     invoice_data.update(
         {
@@ -250,17 +260,15 @@ def create_standard_test_debit_sales_invoice(csr_data, compliance_name):
     """Create standard test sales invoice (Company customer)"""
     company = sanitize_company_name(csr_data)
 
-    invoice_name = "TEST-SINV-2025-105"
+    invoice_name = STANDARD_TEST_INVOICE_NAMES["debit_note"]
     if frappe.db.exists("Sales Invoice", invoice_name):
         return invoice_name
 
-    # Create components
     item_data = create_test_item(company)
     customer = create_test_customer(
         customer_type="Company", tax_id="300450349600003", vat_number="300450349600003"
     )
 
-    # Create invoice data
     invoice_data = create_base_invoice_data(company, csr_data, compliance_name, customer, item_data)
     invoice_data.update(
         {
@@ -276,26 +284,22 @@ def create_standard_test_debit_sales_invoice(csr_data, compliance_name):
 
 
 @frappe.whitelist()
-def create_standard_test_sales_invoice(csr_data, compliance_name):
+def create_standard_test_sales_invoice(csr_data, compliance_name, variant="primary"):
     """Create standard test sales invoice (Company customer)"""
     company = sanitize_company_name(csr_data)
-
-    invoice_name = "TEST-SINV-2025-100"
+    invoice_name = STANDARD_TEST_INVOICE_NAMES.get(variant, STANDARD_TEST_INVOICE_NAMES["primary"])
     if frappe.db.exists("Sales Invoice", invoice_name):
         return invoice_name
 
-    # Create components
     item_data = create_test_item(company)
     customer = create_test_customer(
         customer_type="Company", tax_id="300450349600003", vat_number="300450349600003"
     )
 
-    # Create invoice data
     invoice_data = create_base_invoice_data(company, csr_data, compliance_name, customer, item_data)
     invoice_data.update(
         {
             "name": "TEST-SINV-2025-00212",
-            # "custom_customer_short_name": "S-CHEM",
             "tax_id": "300450349600003",
             "po_no": "123456",
         }
@@ -308,6 +312,9 @@ def create_return_invoice_from_original(
     original_invoice_name, return_invoice_name, compliance_name
 ):
     """Generic function to create return invoice from original"""
+    if frappe.db.exists("Sales Invoice", return_invoice_name):
+        return return_invoice_name
+
     if not frappe.db.exists("Sales Invoice", original_invoice_name):
         frappe.throw(f"Original Sales Invoice {original_invoice_name} does not exist.")
 
@@ -359,7 +366,9 @@ def create_return_invoice_from_original(
 def create_return_invoice(compliance_name):
     """Create return invoice for individual customer"""
     return create_return_invoice_from_original(
-        "TEST-SINV-2025-200", "TEST-SINV-2025-201", compliance_name
+        SIMPLIFIED_TEST_INVOICE_NAMES["primary"],
+        SIMPLIFIED_TEST_INVOICE_NAMES["credit_note"],
+        compliance_name,
     )
 
 
@@ -367,7 +376,9 @@ def create_return_invoice(compliance_name):
 def create_standard_return_invoice(compliance_name):
     """Create return invoice for company customer"""
     return create_return_invoice_from_original(
-        "TEST-SINV-2025-100", "TEST-SINV-2025-101", compliance_name
+        STANDARD_TEST_INVOICE_NAMES["primary"],
+        STANDARD_TEST_INVOICE_NAMES["credit_note"],
+        compliance_name,
     )
 
 
@@ -410,22 +421,41 @@ def get_tax_template_with_15_percent(company):
 def sanitize_company_name(csr_data):
     company_name = csr_data.csrorganizationname
 
-    # Clean unwanted characters
     if company_name:
         company_name = re.sub(r"[.,]", "", company_name).strip()
 
-    # Get list of existing company names
     existing_companies = [c.name for c in frappe.get_all("Company", fields=["name"])]
+    if not existing_companies:
+        frappe.throw(
+            "No Company found in the system. Create a Company before running ZATCA compliance validation."
+        )
 
-    # If company_name is missing or doesn't exist in the system, use the first available one
-    if not company_name or company_name not in existing_companies:
-        company_name = existing_companies[0]
-    return company_name
+    if company_name and company_name in existing_companies:
+        return company_name
+
+    if company_name:
+        frappe.log_error(
+            title="ZATCA Compliance Company Fallback",
+            message=(
+                f"CSR organization name '{company_name}' does not match any Company. "
+                f"Using '{existing_companies[0]}' for compliance test invoices."
+            ),
+        )
+
+    return existing_companies[0]
+
+
+def get_item_name_for_code(item_code):
+    """Return Item name (Link target) for the given item_code field value."""
+    if frappe.db.exists("Item", item_code):
+        return item_code
+
+    return frappe.db.get_value("Item", {"item_code": item_code}, "name")
 
 
 def ensure_test_item(company, item_data, selling_price_list=None):
     """Create or update the ZATCA test item with valid master links."""
-    item_code = item_data["item_code"]
+    test_item_code = item_data["item_code"]
     item_group = get_item_group()
     stock_uom = get_stock_uom(item_data.get("uom", "Nos"))
     item_data["item_group"] = item_group
@@ -434,11 +464,12 @@ def ensure_test_item(company, item_data, selling_price_list=None):
     if selling_price_list is None:
         selling_price_list, _ = get_selling_price_list(company)
 
-    if not frappe.db.exists("Item", item_code):
-        frappe.get_doc(
+    item_name = get_item_name_for_code(test_item_code)
+    if not item_name:
+        item = frappe.get_doc(
             {
                 "doctype": "Item",
-                "item_code": item_code,
+                "item_code": test_item_code,
                 "item_name": item_data["item_name"],
                 "description": item_data["description"],
                 "item_group": item_group,
@@ -455,8 +486,9 @@ def ensure_test_item(company, item_data, selling_price_list=None):
                 ],
             }
         ).insert(ignore_permissions=True)
+        item_name = item.name
     else:
-        item = frappe.get_doc("Item", item_code)
+        item = frappe.get_doc("Item", item_name)
         updated = False
         if item.disabled:
             item.disabled = 0
@@ -481,10 +513,14 @@ def ensure_test_item(company, item_data, selling_price_list=None):
         if updated:
             item.save(ignore_permissions=True)
 
-    ensure_item_price(item_code, selling_price_list, item_data.get("rate", 0))
+    # Link fields (Item Price, Sales Invoice Item) reference Item.name, not Item.item_code.
+    item_data["item_code"] = item_name
+    ensure_item_price(item_name, selling_price_list, item_data.get("rate", 0))
 
-    if not frappe.db.exists("Item", item_code):
-        frappe.throw(f"Failed to create test item '{item_code}' for ZATCA compliance check.")
+    if not frappe.db.exists("Item", item_name):
+        frappe.throw(
+            f"Failed to create test item '{test_item_code}' for ZATCA compliance check."
+        )
 
 
 def ensure_item_price(item_code, price_list, rate):
