@@ -25,6 +25,7 @@ from zatca_integration.saudi_arabia_electronic_invoicing.signing_engine.generate
 from zatca_integration.saudi_arabia_electronic_invoicing.signing_engine.generate_tax_data import (
     build_zatca_tax_section,
 )
+from zatca_integration.saudi_arabia_electronic_invoicing.utils import log_zatca_error
 from zatca_integration.saudi_arabia_electronic_invoicing.signing_engine.initial_invoice_signing import (
     canonicalize_xml,
     certificate_hash,
@@ -213,8 +214,11 @@ def process_invoice_for_zatca_submission(
         return signed_xmlfile_name, uuid1, encoded_hash
 
     except (ValueError, TypeError, KeyError, frappe.ValidationError) as e:
-        frappe.log_error(
-            title="ZATCA invoice call failed",
-            message=f"{frappe.get_traceback()}\nError: {str(e)}",
+        log_zatca_error(
+            title="ZATCA invoice signing failed",
+            message=str(e),
+            reference_doctype="Sales Invoice",
+            reference_name=invoice_number,
+            traceback=frappe.get_traceback(),
         )
         raise

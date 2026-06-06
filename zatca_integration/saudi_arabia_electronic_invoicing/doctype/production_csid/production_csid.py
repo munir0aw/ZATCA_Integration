@@ -10,6 +10,7 @@ from zatca_integration.saudi_arabia_electronic_invoicing.utils import (
     build_certificate_data,
     calculation_expiry_date,
     create_public_key,
+    log_zatca_error,
 )
 
 
@@ -27,34 +28,60 @@ class ProductionCSID(Document):
                 and compliance_csid.simplified_debit_note
                 and compliance_csid.simplified_credit_note
             ):
-                frappe.throw(
+                message = (
                     "All standard and simplified invoices, "
                     "debit notes, and credit notes must be validated for type 1100."
                 )
+                log_zatca_error(
+                    title="Production CSID Compliance Incomplete",
+                    message=message,
+                    reference_doctype="Production CSID",
+                    reference_name=self.name,
+                )
+                frappe.throw(message)
         elif csr_settings.csrinvoicetype == "1000":
             if not (
                 compliance_csid.standard_invoice
                 and compliance_csid.standard_debit_note
                 and compliance_csid.standard_credit_note
             ):
-                frappe.throw(
+                message = (
                     "All standard invoices, debit notes, "
                     "and credit notes must be validated for type 1000."
                 )
+                log_zatca_error(
+                    title="Production CSID Compliance Incomplete",
+                    message=message,
+                    reference_doctype="Production CSID",
+                    reference_name=self.name,
+                )
+                frappe.throw(message)
         elif csr_settings.csrinvoicetype == "0100":
             if not (
                 compliance_csid.simplified_invoice
                 and compliance_csid.simplified_debit_note
                 and compliance_csid.simplified_credit_note
             ):
-                frappe.throw(
+                message = (
                     "All simplified invoices, debit notes, "
                     "and credit notes must be validated for type 0100."
                 )
+                log_zatca_error(
+                    title="Production CSID Compliance Incomplete",
+                    message=message,
+                    reference_doctype="Production CSID",
+                    reference_name=self.name,
+                )
+                frappe.throw(message)
         else:
-            frappe.throw(
-                "Invalid Invoice Type in ZATCA CSR Settings: " + csr_settings.csrinvoicetype
+            message = "Invalid Invoice Type in ZATCA CSR Settings: " + csr_settings.csrinvoicetype
+            log_zatca_error(
+                title="Production CSID Invalid Invoice Type",
+                message=message,
+                reference_doctype="Production CSID",
+                reference_name=self.name,
             )
+            frappe.throw(message)
 
     @frappe.whitelist()
     def generate_zatca_production_csid(self):
@@ -112,6 +139,12 @@ class ProductionCSID(Document):
         self.save()
         frappe.db.commit()
 
+        log_zatca_error(
+            title="ZATCA Production CSID Generation Failed",
+            message=self.errors,
+            reference_doctype="Production CSID",
+            reference_name=self.name,
+        )
         frappe.throw(f"Error in generating ZATCA Production CSID: {self.errors}")
 
 

@@ -6,6 +6,7 @@ from zatca_integration.saudi_arabia_electronic_invoicing.utils import (
     delete_scheduled_job,
     delete_zatca_test_invoices_and_related_docs,
     get_or_create_scheduled_job,
+    log_zatca_error,
     update_cron_format,
 )
 
@@ -157,15 +158,13 @@ def _run_send_multiple_signed_compliance_invoices_to_zatca():
                     if len(error_title) > 140:
                         error_title = error_title[:137] + "..."
 
-                    try:
-                        frappe.log_error(
-                            title=error_title,
-                            message=frappe.utils.cstr(e)
-                        )
-                    except Exception:
-                        frappe.logger().error(
-                            f"Failed to log error for {invoice_data.name}: {str(e)}"
-                        )
+                    log_zatca_error(
+                        title=error_title,
+                        message=frappe.utils.cstr(e),
+                        reference_doctype="Sales Invoice",
+                        reference_name=invoice_data.name,
+                        traceback=frappe.get_traceback(),
+                    )
 
                     results.append({
                         "invoice": invoice_data.name,

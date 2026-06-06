@@ -29,6 +29,7 @@ from zatca_integration.saudi_arabia_electronic_invoicing.utils import (
     get_previous_invoice_hash,
     get_zatca_config,
     get_zatca_config_test,
+    log_zatca_error,
     time_formatter,
 )
 
@@ -115,6 +116,13 @@ def generate_einvoice(doc, submit_now=True, skip_success_message=False):
         else:
             pass
     except requests.exceptions.RequestException as e:
+        log_zatca_error(
+            title="ZATCA Invoice Clearance Request Failed",
+            message=str(e),
+            reference_doctype=doc.doctype,
+            reference_name=doc.name,
+            traceback=frappe.get_traceback(),
+        )
         frappe.throw("Error Clearing Invoice, " + str(e))
 
     _save_transaction(
@@ -146,6 +154,11 @@ def _submit_reporting_request(config, payload, doc):
         return response, {"duration": end_time - start_time}
 
     except requests.exceptions.RequestException as e:
+        log_zatca_error(
+            title="ZATCA Invoice Reporting Request Failed",
+            message=str(e),
+            traceback=frappe.get_traceback(),
+        )
         frappe.throw(f"Error Reporting Invoice: {str(e)}")
 
 
@@ -228,17 +241,40 @@ def _handle_zatca_response(doc, response, invoice_data, payload, zatca_status):
     elif response.status_code == 303:
         _handle_error_response(doc, "FAILED", json.dumps(response_json.get("message", "")))
     elif response.status_code == 400:
-        _handle_error_response(
-            doc, zatca_status_field, json.dumps(response_json.get("validationResults", ""))
+        validation_results = json.dumps(response_json.get("validationResults", ""))
+        _handle_error_response(doc, zatca_status_field, validation_results)
+        log_zatca_error(
+            title="ZATCA Invoice Submission Validation Failed",
+            message=validation_results,
+            reference_doctype=doc.doctype,
+            reference_name=doc.name,
         )
     elif response.status_code == 401:
         _handle_error_response(doc, "FAILED", json.dumps(response_json))
+        log_zatca_error(
+            title="ZATCA Invoice Submission Unauthorized",
+            message=json.dumps(response_json),
+            reference_doctype=doc.doctype,
+            reference_name=doc.name,
+        )
         frappe.throw("Error submitting invoice, Invalid Credentials")
     elif response.status_code == 500:
         _handle_error_response(doc, "FAILED", json.dumps(response_json))
+        log_zatca_error(
+            title="ZATCA Invoice Submission Server Error",
+            message=json.dumps(response_json),
+            reference_doctype=doc.doctype,
+            reference_name=doc.name,
+        )
         frappe.throw("Error submitting invoice, Internal Server Error")
     else:
         _handle_error_response(doc, "FAILED", json.dumps(response_json))
+        log_zatca_error(
+            title=f"ZATCA Invoice Submission Failed ({response.status_code})",
+            message=json.dumps(response_json),
+            reference_doctype=doc.doctype,
+            reference_name=doc.name,
+        )
         frappe.throw("Error submitting invoice, Unknown Error")
 
 
@@ -481,6 +517,12 @@ def display_error_ui(validation_results, doc):
         """
 
     if error_messages:
+        log_zatca_error(
+            title="ZATCA Submission Validation Failed",
+            message=formatted_errors,
+            reference_doctype=doc.doctype,
+            reference_name=doc.name,
+        )
         return frappe.throw(html_output, title="ZATCA Submission Failed")
     elif warning_messages:
         doc.custom_has_warnings = 1
@@ -710,9 +752,12 @@ def bulk_resend_einvoices(invoice_names):
                         }
                     )
             except Exception as e:
-                frappe.log_error(
-                    message=frappe.get_traceback(),
+                log_zatca_error(
                     title=f"ZATCA bulk report failed: {name}",
+                    message=str(e),
+                    reference_doctype="Sales Invoice",
+                    reference_name=name,
+                    traceback=frappe.get_traceback(),
                 )
                 failed.append({"name": name, "message": str(e)})
     finally:

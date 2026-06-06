@@ -29,6 +29,7 @@ from zatca_integration.saudi_arabia_electronic_invoicing.utils import (
     calculation_expiry_date,
     create_public_key,
     delete_zatca_test_invoices_and_related_docs,
+    log_zatca_error,
 )
 
 
@@ -87,16 +88,48 @@ class ComplianceCSID(Document):
         self.save()
         frappe.db.commit()
 
+        log_zatca_error(
+            title="ZATCA Compliance CSID Generation Failed",
+            message=self.errors,
+            reference_doctype="Compliance CSID",
+            reference_name=self.name,
+        )
         frappe.throw(f"Error in generating ZATCA Compliance CSID: {error_message}")
 
     @frappe.whitelist()
     def validate_zatca_compliance_csid(self, invoice):
         """Validate ZATCA Compliance CSID."""
+        try:
+            self._run_zatca_compliance_validation()
+        except frappe.ValidationError:
+            raise
+        except Exception:
+            log_zatca_error(
+                title="ZATCA Compliance Validation Error",
+                message=frappe.get_traceback(),
+                reference_doctype="Compliance CSID",
+                reference_name=self.name,
+            )
+            raise
+
+    def _run_zatca_compliance_validation(self):
         if not self.binary_security_token:
+            log_zatca_error(
+                title="ZATCA Compliance CSID Missing Token",
+                message="Binary Security Token is not generated.",
+                reference_doctype="Compliance CSID",
+                reference_name=self.name,
+            )
             frappe.throw(
                 "Binary Security Token is not generated. Please Generate ZATCA Compliance CSID"
             )
         if not self.secret:
+            log_zatca_error(
+                title="ZATCA Compliance CSID Missing Secret",
+                message="Compliance CSID secret is missing.",
+                reference_doctype="Compliance CSID",
+                reference_name=self.name,
+            )
             frappe.throw(
                 "Compliance CSID secret is missing. Please regenerate the ZATCA Compliance CSID."
             )
@@ -309,9 +342,11 @@ class ComplianceCSID(Document):
         if self._is_compliance_api_success(response_code, response_json):
             return True, invoice_request["invoiceHash"]
 
-        frappe.log_error(
-            title="ZATCA Compliance Invoice Validation Failed",
+        log_zatca_error(
+            title=f"ZATCA Compliance API Failed ({invoice_type})",
             message=self._format_transaction_error(response_code, response_text, response_json),
+            reference_doctype="Compliance CSID",
+            reference_name=self.name,
         )
         return False, None
 
@@ -429,6 +464,18 @@ class ComplianceCSID(Document):
                 for detail in error_details[:3]:
                     message += f"<li>{frappe.utils.escape_html(detail)}</li>"
                 message += "</ul>"
+
+            log_message = (
+                f"Failed checks: {', '.join(failed)}\n"
+                f"Status flags: {required_statuses}\n"
+                f"Recent ZATCA responses:\n- " + "\n- ".join(error_details[:6])
+            )
+            log_zatca_error(
+                title="ZATCA Compliance Validation Failed",
+                message=log_message,
+                reference_doctype="Compliance CSID",
+                reference_name=self.name,
+            )
             frappe.throw(message, title="ZATCA Compliance Validation Failed")
 
     def _is_standard_validation_pending(self):
@@ -589,6 +636,12 @@ class ComplianceCSID(Document):
         self.errors = error_text
         self.save()
         frappe.db.commit()
+        log_zatca_error(
+            title=title,
+            message=error_text,
+            reference_doctype="Compliance CSID",
+            reference_name=self.name,
+        )
         frappe.throw(frappe.utils.escape_html(error_text), title=title)
 
     @frappe.whitelist()
@@ -761,20 +814,41 @@ def render_template(invoice_name):
     sales_invoice = frappe.get_doc("Sales Invoice", invoice_name)
     file_url = sales_invoice.custom_invoice_xml
     if not file_url:
-        frappe.throw(
+        message = (
             f"Invoice XML was not generated for {invoice_name}. "
             "Ensure ZATCA e-invoicing is enabled, the company is in ZATCA Phase 2, "
             "and the test invoice submitted successfully."
         )
+        log_zatca_error(
+            title="ZATCA Test Invoice XML Missing",
+            message=message,
+            reference_doctype="Sales Invoice",
+            reference_name=invoice_name,
+        )
+        frappe.throw(message)
 
     file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
     if not file_name:
-        frappe.throw(f"XML file record not found for invoice {invoice_name} ({file_url}).")
+        message = f"XML file record not found for invoice {invoice_name} ({file_url})."
+        log_zatca_error(
+            title="ZATCA Test Invoice XML File Missing",
+            message=message,
+            reference_doctype="Sales Invoice",
+            reference_name=invoice_name,
+        )
+        frappe.throw(message)
 
     file_doc = frappe.get_doc("File", file_name)
     file_path = frappe.get_site_path("public", file_doc.file_url.lstrip("/"))
     if not os.path.exists(file_path):
-        frappe.throw(f"XML file not found on disk for invoice {invoice_name}: {file_path}")
+        message = f"XML file not found on disk for invoice {invoice_name}: {file_path}"
+        log_zatca_error(
+            title="ZATCA Test Invoice XML Not On Disk",
+            message=message,
+            reference_doctype="Sales Invoice",
+            reference_name=invoice_name,
+        )
+        frappe.throw(message)
 
     with open(file_path, encoding="utf-8") as f:
         return f.read()

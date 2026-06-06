@@ -1,4 +1,5 @@
 import base64
+import re
 import textwrap
 import uuid
 from datetime import datetime, timedelta
@@ -16,6 +17,39 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from frappe import _
 from frappe.utils import add_months, get_datetime, get_site_path
 from PIL import Image
+
+
+def log_zatca_error(title, message="", reference_doctype=None, reference_name=None, traceback=None):
+    """Record ZATCA failures in the site Error Log."""
+    try:
+        safe_title = (title or "ZATCA Error").strip()[:140]
+        log_lines = []
+
+        if reference_doctype and reference_name:
+            log_lines.append(f"Reference: {reference_doctype} / {reference_name}")
+
+        if message:
+            plain_message = re.sub(r"<[^>]+>", "", str(message))
+            plain_message = re.sub(r"\s+", " ", plain_message).strip()
+            if plain_message:
+                log_lines.append(plain_message)
+
+        if traceback:
+            log_lines.append(str(traceback))
+
+        if not log_lines:
+            log_lines.append("No additional details provided.")
+
+        frappe.log_error(
+            title=safe_title,
+            message="\n\n".join(log_lines),
+            reference_doctype=reference_doctype,
+            reference_name=reference_name,
+        )
+    except Exception:
+        frappe.logger("zatca_integration").exception(
+            "Failed to write ZATCA error log for %s", title
+        )
 
 
 @frappe.whitelist()
@@ -770,8 +804,10 @@ def delete_zatca_test_invoices_and_related_docs(silent=False):
                     warehouses_to_delete.add(row.warehouse)
 
         except Exception as e:
-            frappe.log_error(
-                frappe.get_traceback(), f"Failed to delete test invoice {invoice_name}"
+            log_zatca_error(
+                title=f"Failed to delete test invoice {invoice_name}",
+                message=str(e),
+                traceback=frappe.get_traceback(),
             )
             if not silent:
                 frappe.msgprint(f"Error deleting {invoice_name}: {e}")
