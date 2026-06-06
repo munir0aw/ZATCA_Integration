@@ -12,6 +12,7 @@ from frappe.utils.data import get_time
 from zatca_integration.saudi_arabia_electronic_invoicing.utils import (
     get_exemption_reason_map,
     get_zatca_tax_category_details,
+    normalize_zatca_tax_type,
 )
 
 ITEM_TAX_TEMPLATE = "Item Tax Template"
@@ -62,7 +63,7 @@ def tax_data_nominal(invoice, sales_invoice_doc):
                 continue
 
             template = frappe.get_doc("Sales Taxes and Charges Template", tax.tax_template)
-            tax_type = template.custom_tax_type or "Standard Rate"
+            tax_type = normalize_zatca_tax_type(template.custom_tax_type)
             reason = ""
             if tax_type == "Zero Rate":
                 reason = template.custom_zero_rate_reason or "Zero Rated"
@@ -360,7 +361,7 @@ def item_data(invoice, sales_invoice_doc):
 
             classified = ET.SubElement(cac_item, "cac:ClassifiedTaxCategory")
             ET.SubElement(classified, "cbc:ID").text = code
-            ET.SubElement(classified, "cbc:Percent").text = f"{float(tax_rate):.2f}"
+            ET.SubElement(classified, "cbc:Percent").text = f"{tax_details['rate']:.2f}"
 
             if tax_details["category"] != "Standard Rate":
                 reason_code = ET.SubElement(classified, "cbc:TaxExemptionReasonCode")

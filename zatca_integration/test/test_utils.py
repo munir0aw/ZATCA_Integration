@@ -6,6 +6,8 @@ from frappe.tests.utils import FrappeTestCase
 from zatca_integration.saudi_arabia_electronic_invoicing.utils import (
     bytes_to_base64_string,
     get_tax_exemption_code,
+    get_xml_vat_percent,
+    normalize_zatca_tax_type,
     time_formatter,
 )
 
@@ -48,11 +50,20 @@ class TestUtils(FrappeTestCase):
         result = time_formatter(delta)
         self.assertEqual(result, "00:00:00")
 
-    # I wil revisit this function
-    # def test_time_formatter_invalid_type(self):
-    #     """Test time_formatter with invalid type raises exception"""
-    #     with self.assertRaises(TypeError):
-    #         time_formatter(123)  # Integer should raise exception
+    def test_normalize_zatca_tax_type_blank_defaults_to_standard(self):
+        self.assertEqual(normalize_zatca_tax_type(""), "Standard Rate")
+        self.assertEqual(normalize_zatca_tax_type(None), "Standard Rate")
+        self.assertEqual(normalize_zatca_tax_type("   "), "Standard Rate")
+
+    def test_normalize_zatca_tax_type_preserves_known_values(self):
+        self.assertEqual(normalize_zatca_tax_type("Zero Rate"), "Zero Rate")
+        self.assertEqual(normalize_zatca_tax_type("Except Rate"), "Except Rate")
+
+    def test_get_xml_vat_percent_non_standard_is_zero(self):
+        self.assertEqual(get_xml_vat_percent("Z", 15), 0.0)
+        self.assertEqual(get_xml_vat_percent("E", 15), 0.0)
+        self.assertEqual(get_xml_vat_percent("O", 15), 0.0)
+        self.assertEqual(get_xml_vat_percent("S", 15), 15.0)
 
     def test_get_tax_exemption_code_valid_format(self):
         """Test get_tax_exemption_code with valid format"""

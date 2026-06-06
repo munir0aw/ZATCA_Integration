@@ -513,6 +513,21 @@ def get_address(sales_invoice_doc):
     return company_address, customer_address
 
 
+def normalize_zatca_tax_type(tax_type):
+    """Treat blank/unknown template tax types as Standard Rate (15% VAT)."""
+    tax_type = (tax_type or "").strip()
+    if tax_type in ("Standard Rate", "Zero Rate", "Except Rate"):
+        return tax_type
+    return "Standard Rate"
+
+
+def get_xml_vat_percent(category_code, template_rate):
+    """Return BT-152/BT-96/BT-119 percent for UBL; non-standard categories must be zero."""
+    if category_code == "S":
+        return float(template_rate or 0)
+    return 0.0
+
+
 def get_zatca_tax_category_details(invoice_doc):
     """
     Returns the ZATCA tax category, rate, and exemption reason (if any)
@@ -539,18 +554,19 @@ def get_zatca_tax_category_details(invoice_doc):
 
         template = frappe.get_doc("Sales Taxes and Charges Template", invoice_doc.taxes_and_charges)
 
-        tax_type = template.get("custom_tax_type", "Standard Rate")
-        rate = template.get("tax_rate", 15.0)
+        tax_type = normalize_zatca_tax_type(template.get("custom_tax_type"))
+        template_rate = 15.0
         if template.taxes:
-            rate = template.taxes[0].rate
-        else:
-            rate = 15.0  # fallback default
+            template_rate = template.taxes[0].rate
+        elif template.get("tax_rate"):
+            template_rate = template.get("tax_rate")
 
         code_map = {
             "Standard Rate": "S",
             "Zero Rate": "Z",
             "Except Rate": "E",
         }
+        category_code = code_map[tax_type]
         reason_and_code = None
         reason_code = None
         reason_text = None
@@ -563,11 +579,15 @@ def get_zatca_tax_category_details(invoice_doc):
 
         if reason_and_code:
             reason_text, reason_code = get_tax_exemption_code(reason_and_code)
+            reason_map = get_exemption_reason_map()
+            mapped_reason = reason_map.get(reason_code)
+            if mapped_reason:
+                reason_text = mapped_reason[0] if isinstance(mapped_reason, tuple) else mapped_reason
 
         return {
             "category": tax_type,
-            "rate": rate,
-            "code": code_map.get(tax_type, "O"),
+            "rate": get_xml_vat_percent(category_code, template_rate),
+            "code": category_code,
             "exemption_reason_code": reason_code,
             "exemption_reason_text": reason_text,
         }

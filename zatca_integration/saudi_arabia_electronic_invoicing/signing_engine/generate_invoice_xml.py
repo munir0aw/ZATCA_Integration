@@ -791,6 +791,14 @@ def add_document_level_discount_with_tax(invoice, sales_invoice_doc):
     including allowance charges, reason codes, and tax details.
     """
     try:
+        if sales_invoice_doc.currency == "SAR":
+            discount_amount = abs(sales_invoice_doc.get("base_discount_amount", 0.0))
+        else:
+            discount_amount = abs(sales_invoice_doc.get("discount_amount", 0.0))
+
+        if not discount_amount:
+            return invoice
+
         cac_allowance_charge = ET.SubElement(invoice, "cac:AllowanceCharge")
 
         cbc_charge_indicator = ET.SubElement(cac_allowance_charge, "cbc:ChargeIndicator")
@@ -809,12 +817,7 @@ def add_document_level_discount_with_tax(invoice, sales_invoice_doc):
         cbc_amount = ET.SubElement(
             cac_allowance_charge, "cbc:Amount", currencyID=sales_invoice_doc.currency
         )
-        if sales_invoice_doc.currency == "SAR":
-            base_discount_amount = abs(sales_invoice_doc.get("base_discount_amount", 0.0))
-            cbc_amount.text = f"{base_discount_amount:.2f}"
-        else:
-            discount_amount = abs(sales_invoice_doc.get("discount_amount", 0.0))
-            cbc_amount.text = f"{discount_amount:.2f}"
+        cbc_amount.text = f"{discount_amount:.2f}"
 
         cac_tax_category = ET.SubElement(cac_allowance_charge, "cac:TaxCategory")
         cbc_id = ET.SubElement(cac_tax_category, CBC_ID)
@@ -822,7 +825,13 @@ def add_document_level_discount_with_tax(invoice, sales_invoice_doc):
         cbc_id.text = tax_details["code"]
 
         cbc_percent = ET.SubElement(cac_tax_category, "cbc:Percent")
-        cbc_percent.text = f"{float(sales_invoice_doc.taxes[0].rate):.2f}"
+        cbc_percent.text = f"{tax_details['rate']:.2f}"
+
+        if tax_details["category"] != "Standard Rate":
+            exemption_code = ET.SubElement(cac_tax_category, "cbc:TaxExemptionReasonCode")
+            exemption_code.text = tax_details["exemption_reason_code"] or ""
+            exemption_text = ET.SubElement(cac_tax_category, "cbc:TaxExemptionReason")
+            exemption_text.text = tax_details["exemption_reason_text"] or ""
 
         cac_tax_scheme = ET.SubElement(cac_tax_category, "cac:TaxScheme")
         cbc_tax_scheme_id = ET.SubElement(cac_tax_scheme, CBC_ID)
