@@ -5,9 +5,12 @@ import frappe
 from frappe.utils import add_to_date, nowdate
 
 # Constants
+ZATCA_TEST_ITEM_CODE = "Test Item 1"
+ZATCA_TEST_WAREHOUSE_LABEL = "Zatca Test Warehouse"
+
 TEST_ITEM_DATA = {
-    "item_code": "Test Item 1",
-    "item_name": "Test Item 1",
+    "item_code": ZATCA_TEST_ITEM_CODE,
+    "item_name": ZATCA_TEST_ITEM_CODE,
     "description": "Barcode, Self-Adhesive, 3in Wide x 1in Height x 2mm Thick",
     "qty": 16,
     "uom": "Nos",
@@ -660,7 +663,7 @@ def get_expense_account(company):
 
 
 def create_zatca_test_warehouse(company):
-    warehouse_name = "Zatca Test Warehouse"
+    warehouse_name = ZATCA_TEST_WAREHOUSE_LABEL
     company_abbr = frappe.get_value("Company", company, "abbr")
     full_name = f"{warehouse_name} - {company_abbr}"
 

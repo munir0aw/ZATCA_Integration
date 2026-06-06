@@ -818,6 +818,41 @@ def delete_zatca_test_invoices_and_related_docs(silent=False):
     for customer_name in customers_to_delete:
         delete_customer_and_addresses(customer_name)
 
+    delete_known_zatca_test_masters()
+
+
+def delete_known_zatca_test_masters():
+    """Delete ZATCA compliance test masters even if no test invoice remains."""
+    from zatca_integration.saudi_arabia_electronic_invoicing.data.test_data import (
+        TEST_CUSTOMER_DATA,
+        ZATCA_TEST_ITEM_CODE,
+        ZATCA_TEST_WAREHOUSE_LABEL,
+    )
+
+    item_name = resolve_item_name(ZATCA_TEST_ITEM_CODE)
+    if item_name:
+        delete_item_prices_for_item(item_name)
+        if frappe.db.exists("Item", item_name):
+            frappe.delete_doc("Item", item_name, force=1)
+
+    test_warehouses = frappe.get_all(
+        "Warehouse",
+        filters={"warehouse_name": ZATCA_TEST_WAREHOUSE_LABEL},
+        pluck="name",
+    )
+    for warehouse_name in test_warehouses:
+        if frappe.db.exists("Warehouse", warehouse_name):
+            frappe.delete_doc("Warehouse", warehouse_name, force=1)
+
+    customer_prefix = TEST_CUSTOMER_DATA["customer_name"]
+    test_customers = frappe.get_all(
+        "Customer",
+        filters={"customer_name": ["like", f"{customer_prefix}%"]},
+        pluck="name",
+    )
+    for customer_name in test_customers:
+        delete_customer_and_addresses(customer_name)
+
 
 # -----------------------------
 # Helper Functions for Deleting test invoices
@@ -840,12 +875,6 @@ def _delete_test_invoice_and_collect_related(
             frappe.msgprint(f"Processing test invoice: {invoice_name}")
         invoice = frappe.get_doc("Sales Invoice", invoice_name)
 
-        delete_gl_and_payment_ledgers(invoice_name)
-        delete_zatca_transaction(invoice_name)
-        if not invoice.is_return:
-            delete_return_invoice(invoice_name)
-        cancel_and_delete_invoice(invoice)
-
         if inv.customer:
             customers_to_delete.add(inv.customer)
         for row in invoice.items:
@@ -854,6 +883,12 @@ def _delete_test_invoice_and_collect_related(
                 items_to_delete.add(item_name)
             if row.warehouse:
                 warehouses_to_delete.add(row.warehouse)
+
+        delete_gl_and_payment_ledgers(invoice_name)
+        delete_zatca_transaction(invoice_name)
+        if not invoice.is_return:
+            delete_return_invoice(invoice_name)
+        cancel_and_delete_invoice(invoice)
 
     except frappe.DoesNotExistError:
         return

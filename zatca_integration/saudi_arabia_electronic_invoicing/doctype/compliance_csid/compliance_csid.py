@@ -102,6 +102,7 @@ class ComplianceCSID(Document):
         try:
             self._run_zatca_compliance_validation()
         except frappe.ValidationError:
+            delete_zatca_test_invoices_and_related_docs(silent=True)
             raise
         except Exception:
             log_zatca_error(
@@ -110,6 +111,7 @@ class ComplianceCSID(Document):
                 reference_doctype="Compliance CSID",
                 reference_name=self.name,
             )
+            delete_zatca_test_invoices_and_related_docs(silent=True)
             raise
 
     def _run_zatca_compliance_validation(self):
