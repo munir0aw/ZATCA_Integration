@@ -781,36 +781,30 @@ def delete_zatca_test_invoices_and_related_docs(silent=False):
     warehouses_to_delete = set()
 
     for inv in test_invoices:
-        invoice_name = inv.name
+        if inv.is_return:
+            # Return invoices are removed when their original invoice is processed.
+            continue
 
-        try:
-            if not silent:
-                frappe.msgprint(f"Processing test invoice: {invoice_name}")
-            invoice = frappe.get_doc("Sales Invoice", invoice_name)
+        _delete_test_invoice_and_collect_related(
+            inv,
+            silent=silent,
+            customers_to_delete=customers_to_delete,
+            items_to_delete=items_to_delete,
+            warehouses_to_delete=warehouses_to_delete,
+        )
 
-            delete_gl_and_payment_ledgers(invoice_name)
-            delete_zatca_transaction(invoice_name)
-            if not invoice.is_return:
-                delete_return_invoice(invoice_name)
-            cancel_and_delete_invoice(invoice)
+    # Remove any orphaned return invoices left behind.
+    for inv in test_invoices:
+        if not inv.is_return:
+            continue
 
-            if inv.customer:
-                customers_to_delete.add(inv.customer)
-            for row in invoice.items:
-                item_name = resolve_item_name(row.item_code)
-                if item_name:
-                    items_to_delete.add(item_name)
-                if row.warehouse:
-                    warehouses_to_delete.add(row.warehouse)
-
-        except Exception as e:
-            log_zatca_error(
-                title=f"Failed to delete test invoice {invoice_name}",
-                message=str(e),
-                traceback=frappe.get_traceback(),
-            )
-            if not silent:
-                frappe.msgprint(f"Error deleting {invoice_name}: {e}")
+        _delete_test_invoice_and_collect_related(
+            inv,
+            silent=silent,
+            customers_to_delete=customers_to_delete,
+            items_to_delete=items_to_delete,
+            warehouses_to_delete=warehouses_to_delete,
+        )
 
     for item_name in items_to_delete:
         delete_item_prices_for_item(item_name)
@@ -828,6 +822,49 @@ def delete_zatca_test_invoices_and_related_docs(silent=False):
 # -----------------------------
 # Helper Functions for Deleting test invoices
 # -----------------------------
+
+
+def _delete_test_invoice_and_collect_related(
+    inv,
+    silent=False,
+    customers_to_delete=None,
+    items_to_delete=None,
+    warehouses_to_delete=None,
+):
+    invoice_name = inv.name
+    if not frappe.db.exists("Sales Invoice", invoice_name):
+        return
+
+    try:
+        if not silent:
+            frappe.msgprint(f"Processing test invoice: {invoice_name}")
+        invoice = frappe.get_doc("Sales Invoice", invoice_name)
+
+        delete_gl_and_payment_ledgers(invoice_name)
+        delete_zatca_transaction(invoice_name)
+        if not invoice.is_return:
+            delete_return_invoice(invoice_name)
+        cancel_and_delete_invoice(invoice)
+
+        if inv.customer:
+            customers_to_delete.add(inv.customer)
+        for row in invoice.items:
+            item_name = resolve_item_name(row.item_code)
+            if item_name:
+                items_to_delete.add(item_name)
+            if row.warehouse:
+                warehouses_to_delete.add(row.warehouse)
+
+    except frappe.DoesNotExistError:
+        return
+    except Exception as e:
+        log_zatca_error(
+            title=f"Failed to delete test invoice {invoice_name}",
+            message=str(e),
+            traceback=frappe.get_traceback(),
+        )
+        if not silent:
+            frappe.msgprint(f"Error deleting {invoice_name}: {e}")
 
 
 def delete_gl_and_payment_ledgers(invoice_name):
