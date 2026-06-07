@@ -3,135 +3,82 @@
 
 import frappe
 
+TAX_TYPES = ("Standard Rate", "Except Rate", "Zero Rate")
+
 
 def execute(filters=None):
+    filters = filters or {}
     columns = get_columns()
     data = []
 
-    # Sales Invoices Sales and VAT
     append_heading("Sales Invoices and VAT", data)
-    sales_invoices = frappe.get_all(
-        "Sales Invoice",
-        fields=[
-            {"SUM": "base_total", "as": "base_total"},
-            {"SUM": "base_total_taxes_and_charges", "as": "base_total_taxes_and_charges"},
-            {"SUM": "base_grand_total", "as": "base_grand_total"},
-            "is_return",
-            "taxes_and_charges.custom_tax_type",
-        ],
-        group_by="custom_tax_type, is_return",
-        ignore_permissions=True,
-    )
+    append_tax_type_rows(data, get_invoice_totals("Sales Invoice", filters))
 
-    standard_rate = [
-        invoice
-        for invoice in sales_invoices
-        if invoice["custom_tax_type"] == "Standard Rate" and invoice["is_return"] == 0
-    ]
-    standard_rate_sum = get_tax_sum(standard_rate)
-    standard_rate_adjustment = [
-        invoice
-        for invoice in sales_invoices
-        if invoice["custom_tax_type"] == "Standard Rate" and invoice["is_return"] == 1
-    ]
-    standard_rate_adjustment_sum = get_tax_sum(standard_rate_adjustment)
-    append_data("Standard Rate", data, standard_rate_sum, standard_rate_adjustment_sum)
-
-    except_rate = [
-        invoice
-        for invoice in sales_invoices
-        if invoice["custom_tax_type"] == "Except Rate" and invoice["is_return"] == 0
-    ]
-    except_rate_sum = get_tax_sum(except_rate)
-    except_rate_adjustment = [
-        invoice
-        for invoice in sales_invoices
-        if invoice["custom_tax_type"] == "Except Rate" and invoice["is_return"] == 1
-    ]
-    except_rate_adjustment_sum = get_tax_sum(except_rate_adjustment)
-    append_data("Except Rate", data, except_rate_sum, except_rate_adjustment_sum)
-
-    zero_rate = [
-        invoice
-        for invoice in sales_invoices
-        if invoice["custom_tax_type"] == "Zero Rate" and invoice["is_return"] == 0
-    ]
-    zero_rate_sum = get_tax_sum(zero_rate)
-    zero_rate_adjustment = [
-        invoice
-        for invoice in sales_invoices
-        if invoice["custom_tax_type"] == "Zero Rate" and invoice["is_return"] == 1
-    ]
-    zero_rate_adjustment_sum = get_tax_sum(zero_rate_adjustment)
-    append_data("Zero Rate", data, zero_rate_sum, zero_rate_adjustment_sum)
-
-    # Purchase Invoices Sales and VAT
     append_heading("Purchase Invoices and VAT", data)
-    purchase_invoices = frappe.get_all(
-        "Purchase Invoice",
-        fields=[
-            {"SUM": "base_total", "as": "base_total"},
-            {"SUM": "base_total_taxes_and_charges", "as": "base_total_taxes_and_charges"},
-            {"SUM": "base_grand_total", "as": "base_grand_total"},
-            "is_return",
-            "taxes_and_charges.custom_tax_type",
-        ],
-        group_by="custom_tax_type, is_return",
-        ignore_permissions=True,
-    )
-
-    standard_rate = [
-        invoice
-        for invoice in purchase_invoices
-        if invoice["custom_tax_type"] == "Standard Rate" and invoice["is_return"] == 0
-    ]
-    standard_rate_sum = get_tax_sum(standard_rate)
-    standard_rate_adjustment = [
-        invoice
-        for invoice in purchase_invoices
-        if invoice["custom_tax_type"] == "Standard Rate" and invoice["is_return"] == 1
-    ]
-    standard_rate_adjustment_sum = get_tax_sum(standard_rate_adjustment)
-    append_data("Standard Rate", data, standard_rate_sum, standard_rate_adjustment_sum)
-
-    except_rate = [
-        invoice
-        for invoice in purchase_invoices
-        if invoice["custom_tax_type"] == "Except Rate" and invoice["is_return"] == 0
-    ]
-    except_rate_sum = get_tax_sum(except_rate)
-    except_rate_adjustment = [
-        invoice
-        for invoice in purchase_invoices
-        if invoice["custom_tax_type"] == "Except Rate" and invoice["is_return"] == 1
-    ]
-    except_rate_adjustment_sum = get_tax_sum(except_rate_adjustment)
-    append_data("Except Rate", data, except_rate_sum, except_rate_adjustment_sum)
-
-    zero_rate = [
-        invoice
-        for invoice in purchase_invoices
-        if invoice["custom_tax_type"] == "Zero Rate" and invoice["is_return"] == 0
-    ]
-    zero_rate_sum = get_tax_sum(zero_rate)
-    zero_rate_adjustment = [
-        invoice
-        for invoice in purchase_invoices
-        if invoice["custom_tax_type"] == "Zero Rate" and invoice["is_return"] == 1
-    ]
-    zero_rate_adjustment_sum = get_tax_sum(zero_rate_adjustment)
-    append_data("Zero Rate", data, zero_rate_sum, zero_rate_adjustment_sum)
+    append_tax_type_rows(data, get_invoice_totals("Purchase Invoice", filters))
 
     return columns, data
 
 
-def get_tax_sum(input):
+def get_invoice_totals(doctype, filters):
+    if doctype == "Sales Invoice":
+        invoice_table = "tabSales Invoice"
+        template_table = "tabSales Taxes and Charges Template"
+    else:
+        invoice_table = "tabPurchase Invoice"
+        template_table = "tabPurchase Taxes and Charges Template"
+
+    return frappe.db.sql(
+        f"""
+        SELECT
+            stct.custom_tax_type,
+            si.is_return,
+            SUM(si.base_total) AS base_total,
+            SUM(si.base_total_taxes_and_charges) AS base_total_taxes_and_charges,
+            SUM(si.base_grand_total) AS base_grand_total
+        FROM `{invoice_table}` si
+        LEFT JOIN `{template_table}` stct ON stct.name = si.taxes_and_charges
+        WHERE
+            si.docstatus = 1
+            AND si.company = %(company)s
+            AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
+        GROUP BY stct.custom_tax_type, si.is_return
+        """,
+        {
+            "company": filters.get("company"),
+            "from_date": filters.get("from_date"),
+            "to_date": filters.get("to_date"),
+        },
+        as_dict=True,
+    )
+
+
+def append_tax_type_rows(data, invoices):
+    for tax_type in TAX_TYPES:
+        collected = get_tax_sum(
+            [
+                row
+                for row in invoices
+                if row.get("custom_tax_type") == tax_type and not row.get("is_return")
+            ]
+        )
+        credited = get_tax_sum(
+            [
+                row
+                for row in invoices
+                if row.get("custom_tax_type") == tax_type and row.get("is_return")
+            ]
+        )
+        append_data(tax_type, data, collected, credited)
+
+
+def get_tax_sum(rows):
     return {
-        "base_total_sum": sum(invoice.get("base_total") or 0 for invoice in input),
+        "base_total_sum": sum(row.get("base_total") or 0 for row in rows),
         "base_total_taxes_and_charges_sum": sum(
-            invoice.get("base_total_taxes_and_charges") or 0 for invoice in input
+            row.get("base_total_taxes_and_charges") or 0 for row in rows
         ),
-        "base_grand_total_sum": sum(invoice.get("base_grand_total") or 0 for invoice in input),
+        "base_grand_total_sum": sum(row.get("base_grand_total") or 0 for row in rows),
     }
 
 

@@ -36,7 +36,8 @@
   "label": "ZATCA Integrations",
   "links": [],
   "modified": "2025-07-27 09:12:33.182485",
-  "module": null,
+  "module": "Saudi Arabia Electronic Invoicing",
+  "app": "zatca_integration",
   "type": "Workspace",
   "name": "ZATCA Integrations",
   "number_cards": [

@@ -190,3 +190,7 @@ def setup(company=None, patch=True):
     ]
     custom_fields = {"Sales Invoice": sales_invoice_fields}
     create_custom_fields(custom_fields, ignore_validate=True, update=True)
+
+    from zatca_integration.setup_desk import sync_zatca_desk
+
+    sync_zatca_desk()
