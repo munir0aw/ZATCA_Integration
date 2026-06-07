@@ -18,13 +18,12 @@ def execute(filters=None):
         as_dict=True,
     )
 
-    # ✅ Get the first (and only) row
-    row = result[0]
+    row = result[0] if result else {}
 
     data = [
-        ["Min Time", row["min_time"]],
-        ["Max Time", row["max_time"]],
-        ["Avg Time", round(row["avg_time"], 2)],
+        ["Min Time", row.get("min_time") or 0],
+        ["Max Time", row.get("max_time") or 0],
+        ["Avg Time", round(row["avg_time"], 2) if row.get("avg_time") is not None else 0],
     ]
 
     columns = ["Metric", "Value"]

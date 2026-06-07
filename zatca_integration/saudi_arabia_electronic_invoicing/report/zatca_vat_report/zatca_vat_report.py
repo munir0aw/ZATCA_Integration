@@ -13,9 +13,9 @@ def execute(filters=None):
     sales_invoices = frappe.get_all(
         "Sales Invoice",
         fields=[
-            "SUM(base_total) AS base_total",
-            "SUM(base_total_taxes_and_charges) AS base_total_taxes_and_charges",
-            "SUM(base_grand_total) AS base_grand_total",
+            {"SUM": "base_total", "as": "base_total"},
+            {"SUM": "base_total_taxes_and_charges", "as": "base_total_taxes_and_charges"},
+            {"SUM": "base_grand_total", "as": "base_grand_total"},
             "is_return",
             "taxes_and_charges.custom_tax_type",
         ],
@@ -70,9 +70,9 @@ def execute(filters=None):
     purchase_invoices = frappe.get_all(
         "Purchase Invoice",
         fields=[
-            "SUM(base_total) AS base_total",
-            "SUM(base_total_taxes_and_charges) AS base_total_taxes_and_charges",
-            "SUM(base_grand_total) AS base_grand_total",
+            {"SUM": "base_total", "as": "base_total"},
+            {"SUM": "base_total_taxes_and_charges", "as": "base_total_taxes_and_charges"},
+            {"SUM": "base_grand_total", "as": "base_grand_total"},
             "is_return",
             "taxes_and_charges.custom_tax_type",
         ],
@@ -127,11 +127,11 @@ def execute(filters=None):
 
 def get_tax_sum(input):
     return {
-        "base_total_sum": sum(invoice["base_total"] for invoice in input),
+        "base_total_sum": sum(invoice.get("base_total") or 0 for invoice in input),
         "base_total_taxes_and_charges_sum": sum(
-            invoice["base_total_taxes_and_charges"] for invoice in input
+            invoice.get("base_total_taxes_and_charges") or 0 for invoice in input
         ),
-        "base_grand_total_sum": sum(invoice["base_grand_total"] for invoice in input),
+        "base_grand_total_sum": sum(invoice.get("base_grand_total") or 0 for invoice in input),
     }
 
 

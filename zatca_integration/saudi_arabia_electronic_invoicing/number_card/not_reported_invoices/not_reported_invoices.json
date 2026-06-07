@@ -16,7 +16,7 @@
  "modified": "2025-07-14 15:09:39.840015",
  "modified_by": "Administrator",
  "module": "Saudi Arabia Electronic Invoicing",
- "name": "NOT REPORTED INVOICES",
+ "name": "FAILED REPORTED INVOICES",
  "owner": "Administrator",
  "parent_document_type": "",
  "report_function": "Sum",
