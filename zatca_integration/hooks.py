@@ -4,17 +4,7 @@ app_publisher = "Beveren Software"
 app_description = "Saudi Arabia Electronic Invoicing Phase 2"
 app_email = "info@beverensoftware.com"
 app_license = "mit"
-app_home = "/desk/zatca-integrations"
 # required_apps = []
-
-add_to_apps_screen = [
-    {
-        "name": "zatca_integration",
-        "logo": "/assets/zatca_integration/images/zatca.svg",
-        "title": "ZATCA",
-        "route": "/desk/zatca-integrations",
-    }
-]
 
 # Includes in <head>
 # ------------------
@@ -267,7 +257,6 @@ fixtures = [
 
 # before_app_install = "zatca_integration.utils.before_app_install"
 after_app_install = "zatca_integration.saudi_arabia_electronic_invoicing.phase_one_utils.setup"
-after_migrate = "zatca_integration.setup_desk.sync_zatca_desk"
 # after_app_install = "zatca_integration.utils.after_app_install"
 
 # Integration Cleanup
