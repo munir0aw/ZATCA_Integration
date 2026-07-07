@@ -5,7 +5,7 @@ app_description = "Saudi Arabia Electronic Invoicing Phase 2"
 app_email = "info@beverensoftware.com"
 app_license = "mit"
 app_logo_url = "/assets/zatca_integration/images/zatca.png"
-app_home = "/desk/zatca-integrations"
+app_home = "/desk/dashboard-view/Zatca"
 # required_apps = []
 
 add_to_apps_screen = [
