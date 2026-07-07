@@ -4,14 +4,25 @@ app_publisher = "Beveren Software"
 app_description = "Saudi Arabia Electronic Invoicing Phase 2"
 app_email = "info@beverensoftware.com"
 app_license = "mit"
+app_logo_url = "/assets/zatca_integration/images/zatca.png"
+app_home = "/desk/zatca-integrations"
 # required_apps = []
+
+add_to_apps_screen = [
+    {
+        "name": "zatca_integration",
+        "logo": app_logo_url,
+        "title": app_title,
+        "route": app_home,
+    }
+]
 
 # Includes in <head>
 # ------------------
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/zatca_integration/css/zatca_integration.css"
-# app_include_js = "/assets/zatca_integration/js/zatca_integration.js"
+app_include_js = "/assets/zatca_integration/js/desktop_icon.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/zatca_integration/css/zatca_integration.css"

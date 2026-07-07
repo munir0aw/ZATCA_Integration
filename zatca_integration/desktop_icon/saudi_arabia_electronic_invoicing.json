@@ -1,0 +1,13 @@
+{
+ "app": "zatca_integration",
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon_type": "App",
+ "idx": 0,
+ "label": "Saudi Arabia Electronic Invoicing",
+ "link": "/desk/zatca-integrations",
+ "link_type": "External",
+ "logo_url": "/assets/zatca_integration/images/zatca.png",
+ "name": "Saudi Arabia Electronic Invoicing",
+ "standard": 1
+}
