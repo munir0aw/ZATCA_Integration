@@ -3,22 +3,21 @@ from frappe.desk.doctype.desktop_icon.desktop_icon import clear_desktop_icons_ca
 
 
 def execute():
-	"""Ensure the ZATCA app desktop icon is configured for Frappe v16."""
+	"""Refresh desk icon/logo after assets were updated."""
 	app_title = frappe.get_hooks("app_title", app_name="zatca_integration")[0]
 	app_details = frappe.get_hooks("add_to_apps_screen", app_name="zatca_integration")
 	if not app_details:
 		return
 
-	route = app_details[0].get("route")
 	logo = app_details[0].get("logo")
+	route = app_details[0].get("route")
 
-	if frappe.db.exists("Desktop Icon", app_title):
-		icon = frappe.get_doc("Desktop Icon", app_title)
-	else:
-		icon = frappe.new_doc("Desktop Icon")
-		icon.label = app_title
+	if not frappe.db.exists("Desktop Icon", app_title):
+		return
 
-	icon.update(
+	frappe.db.set_value(
+		"Desktop Icon",
+		app_title,
 		{
 			"icon_type": "App",
 			"link_type": "External",
@@ -29,14 +28,11 @@ def execute():
 			"standard": 1,
 			"hidden": 0,
 			"bg_color": "gray",
-		}
+		},
+		update_modified=False,
 	)
-	icon.flags.ignore_links = True
-	icon.save(ignore_permissions=True)
 
-	# Drop stale per-user desk layouts that can keep old/broken icon images.
 	frappe.db.delete("Desktop Layout")
-
 	clear_desktop_icons_cache()
 	frappe.cache.delete_key("bootinfo")
 	frappe.clear_cache()

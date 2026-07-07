@@ -6,4 +6,5 @@ zatca_integration.saudi_arabia_electronic_invoicing.patches.sales_invoice
 [post_model_sync]
 zatca_integration.saudi_arabia_electronic_invoicing.patches.rename_failed_reported_number_card
 zatca_integration.saudi_arabia_electronic_invoicing.patches.setup_desktop_icon
+zatca_integration.saudi_arabia_electronic_invoicing.patches.refresh_desktop_icon_layout
 # Patches added in this section will be executed after doctypes are migrated
