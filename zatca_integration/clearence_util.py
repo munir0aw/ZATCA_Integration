@@ -852,6 +852,9 @@ def get_auto_sales_submission(company):
 
 def generate_einvoice_on_submit(doc, method=None):
     """Generate einvoice on submit"""
+    if doc.is_opening == "Yes":
+        return
+
     submit_now = get_auto_sales_submission(doc.company)
     if not submit_now:
         generate_einvoice(doc, submit_now=True)

@@ -6,7 +6,7 @@ import frappe
 
 
 def validate_sales_invoice(doc, method):
-    if not doc.taxes_and_charges:
+    if not doc.taxes_and_charges and doc.is_opening != "Yes":
         frappe.throw("Sales Taxes and Charges Template must be provided.")
         
     if doc.is_return and (not doc.return_against and not doc.custom_cn_ref):
