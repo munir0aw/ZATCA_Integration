@@ -222,12 +222,13 @@ def xml_tags():
         return None
 
 
-def salesinvoice_data(invoice, invoice_number):
+def salesinvoice_data(invoice, invoice_number, sales_invoice_doc=None):
     """
     Populates the Sales Invoice XML with key elements and metadata.
     """
 
-    sales_invoice_doc = frappe.get_doc("Sales Invoice", invoice_number)
+    if sales_invoice_doc is None:
+        sales_invoice_doc = frappe.get_doc("Sales Invoice", invoice_number)
 
     cbc_profile_id = ET.SubElement(invoice, "cbc:ProfileID")
     cbc_profile_id.text = "reporting:1.0"

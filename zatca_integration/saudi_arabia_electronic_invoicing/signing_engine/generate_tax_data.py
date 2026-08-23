@@ -13,6 +13,8 @@ def extract_tax_details_for_item(full_string, item):
     """
     Extracts the tax amount and tax percentage for a specific item from a JSON-encoded string.
     """
+    if not full_string:
+        return 0, None
     try:
         data = json.loads(full_string)
         tax_percentage = data.get(item, [0, 0])[0]
@@ -29,15 +31,34 @@ def extract_tax_details_for_item(full_string, item):
         return None
 
 
+def get_item_tax_rate_fallback(single_item, tax_account_head):
+    """
+    Fall back to the item's own tax rate map when the parent tax row's
+    item_wise_tax_detail has not been computed yet (e.g. item_tax_rate is
+    always set on the item row, independent of tax total recalculation).
+    """
+    item_tax_rate = single_item.get("item_tax_rate")
+    if not item_tax_rate:
+        return 0
+    try:
+        rate_map = json.loads(item_tax_rate) if isinstance(item_tax_rate, str) else item_tax_rate
+    except json.JSONDecodeError:
+        return 0
+    return rate_map.get(tax_account_head, 0) or 0
+
+
 def calculate_total_item_tax(sales_invoice_doc):
     """Getting tax total for items"""
     TAX_ERROR_MESSAGE = "Tax Calculation Error"
     try:
         total_tax = 0
+        tax_row = sales_invoice_doc.taxes[0]
         for single_item in sales_invoice_doc.items:
             _item_tax_amount, tax_percent = extract_tax_details_for_item(
-                sales_invoice_doc.taxes[0].item_wise_tax_detail, single_item.item_code
+                tax_row.item_wise_tax_detail, single_item.item_code
             )
+            if tax_percent is None:
+                tax_percent = get_item_tax_rate_fallback(single_item, tax_row.account_head)
             total_tax = total_tax + (single_item.net_amount * (tax_percent / 100))
         return total_tax
     except AttributeError as e:
@@ -216,8 +237,9 @@ def build_zatca_tax_section(invoice, sales_invoice_doc):
         tax_scheme_id.text = "VAT"
 
         # --- VAT accounting currency (SAR) total (BT-111) ---
-        # Check o this
-        if doc_currency != "SDAR":
+        # ZATCA requires this second TaxTotal only when the document currency
+        # differs from the VAT accounting currency (SAR); omit it for SAR invoices.
+        if doc_currency != "SAR":
             sar_taxtotal = ET.SubElement(invoice, "cac:TaxTotal")
             sar_taxamount = ET.SubElement(sar_taxtotal, "cbc:TaxAmount")
             sar_taxamount.set("currencyID", "SAR")

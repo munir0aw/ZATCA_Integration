@@ -62,10 +62,14 @@ def generate_einvoice(doc, submit_now=True, skip_success_message=False):
             any_item_has_tax_template=False,
             is_zatca_test=1,
             compliance_csid=doc.custom_compliance,
+            sales_invoice_doc=doc,
         )
     else:
         signed_xmlfile_name, uuid1, encoded_hash = process_invoice_for_zatca_submission(
-            doc.name, compliance_type=compliance_type, any_item_has_tax_template=False
+            doc.name,
+            compliance_type=compliance_type,
+            any_item_has_tax_template=False,
+            sales_invoice_doc=doc,
         )
     backend_end_time = time_module.time()
     backend_time_taken = backend_end_time - backend_start_time

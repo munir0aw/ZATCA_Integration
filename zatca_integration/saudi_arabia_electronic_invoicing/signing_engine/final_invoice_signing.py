@@ -111,15 +111,18 @@ def process_invoice_for_zatca_submission(
     any_item_has_tax_template=False,
     is_zatca_test=0,
     compliance_csid=None,
+    sales_invoice_doc=None,
 ):
     """zatca call which includes the function calling and validation reguarding the api and
     based on this the zATCA output and message is getting"""
     try:
-        if not frappe.db.exists("Sales Invoice", invoice_number):
+        if sales_invoice_doc is None and not frappe.db.exists("Sales Invoice", invoice_number):
             frappe.throw(_("Invoice Number is NOT Valid: " + str(invoice_number)))
         invoice = xml_tags()
 
-        invoice, uuid1, sales_invoice_doc = salesinvoice_data(invoice, invoice_number)
+        invoice, uuid1, sales_invoice_doc = salesinvoice_data(
+            invoice, invoice_number, sales_invoice_doc=sales_invoice_doc
+        )
 
         customer_doc = frappe.get_doc("Customer", sales_invoice_doc.customer)
         if compliance_type == "0":
